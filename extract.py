@@ -320,19 +320,19 @@ def process_pdf_folder(input_folder):
             pdf_path = os.path.join(input_folder, filename)
             print(f"===========正在处理PDF文件：{pdf_path}")  
             pdf_texts = get_pdf_texts(pdf_path)
-            pdf_texts = pdf_texts[-1]
+            pdf_texts = pdf_texts[-1]  # 只取最后一页
             if pdf_texts == "":
                 print(f"{pdf_path}是图片型pdf,请人工识别")
                 error_file.write(f"{pdf_path}是图片型pdf,请人工识别")
-            res_dict = {t:None for t in field_func_maps}
+            res_dict = {t:None for t in field_func_maps}  # 提取到的信息将放在res_dict中
             res_dict["PDF绝对路径"] = os.path.abspath(pdf_path)
             retry_time = 0
-            while not all(res_dict.values()) and retry_time < max_retry_time:
+            while not all(res_dict.values()) and retry_time < max_retry_time: # 如果有一个字段没有提取到，就重试，最多重试 max_retry_time 次
                 retry_time += 1
-                ocr_texts = OCR.ocr_pdf(pdf_path)[-1]
-                for field in res_dict:
+                ocr_texts = OCR.ocr_pdf(pdf_path)[-1] # ocr, 同样只取最后一页
+                for field in res_dict:   # 对于每个信息
                     if res_dict[field] is None:
-                        res_dict[field] = field_func_maps[field](ocr_texts,pdf_texts,pdf_path)
+                        res_dict[field] = field_func_maps[field](ocr_texts,pdf_texts,pdf_path)  #使用这个信息的提取函数。field_func_maps里存了各个信息的提取函数。
             pdf_infos.append(res_dict)
     pdf_infos_to_csv(pdf_infos)
             
@@ -342,11 +342,14 @@ def process_pdf_folder(input_folder):
                 
 
 if __name__ == "__main__":
+
+    # 下面4行解析命令行参数，获取发票文件夹路径
     parser = argparse.ArgumentParser(description="Process PDF files to extract invoice information.")
     parser.add_argument("--input_folder", type=str, default=input_folder, help="Path to the input folder containing PDF files.")
     args = parser.parse_args()
-
     input_folder = args.input_folder
+
+    # 创建输出文件夹
     if not os.path.exists(output_folder):
         os.makedirs(output_folder,exist_ok=True)
     current_time = datetime.now()
@@ -354,14 +357,17 @@ if __name__ == "__main__":
     if this_time_output_folder is None:
         this_time_output_folder = os.path.join(output_folder,formatted_time)
     os.makedirs(this_time_output_folder,exist_ok=True)
+
+    # 设置同时向命令行和文件输出日志
     all_log_file_name = os.path.join(this_time_output_folder,"all.log")
     f= open(all_log_file_name,"w",encoding="utf8")
     set_runing_log_output(f)  #同时输出到控制台和文件
 
+    # 创建警告和错误日志输出的文件
     warning_file = open(os.path.join(this_time_output_folder,"warning.log"),"w",encoding="utf8")  #警告日志 输出位置
     error_file = open(os.path.join(this_time_output_folder,"error.log"),"w",encoding="utf8")   # 无法识别的文件的输出日志
 
     
 
-
+    # 遍历PDF文件夹，提取发票信息
     process_pdf_folder(input_folder)
