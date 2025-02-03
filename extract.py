@@ -2,12 +2,14 @@ from datetime import datetime
 import os
 import re
 import sys
+sys.dont_write_bytecode = True
 from typing import List
 import fitz  # PyMuPDF
 import OCR
 import difflib
 import csv
 import argparse
+
 
 max_retry_time = 5
 input_folder = r"发票"  # 输入PDF文件的文件夹路径
