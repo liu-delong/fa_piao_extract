@@ -13,7 +13,23 @@ max_retry_time = 5
 input_folder = r"发票"  # 输入PDF文件的文件夹路径
 output_folder = "outputs"
 this_time_output_folder = None  #如果为None 会设置成 output_folder_本次运行时间
+
+
+"""
+author: liudelong
+date: 2025-2-3
+description: 本脚本用于提取PDF文件中的发票信息，包括发票类型、发票号码、名称税号、合计金额、备注等。
+代码阅读建议：
+1. 首先阅读：if __name__ == "__main__": 这个部分，这个部分是程序的入口，是整个程序的主要逻辑。
+    它最后调用process_pdf_folder(input_folder)这个函数，这个函数是整个程序的核心，是用来提取PDF文件中的发票信息的。
+2. 然后阅读：process_pdf_folder(input_folder) 这个函数。这个函数里面有注释。会引导你读其他函数。
+3. 然后阅读field_func_maps(位于process_pdf_folder上方)中罗列的函数:每个函数前面的注释会告诉你这个函数是用来提取什么信息的，
+    以及提取信息的方法。
+"""
 def set_runing_log_output(output_log_file):
+    """
+    设置同时向命令行和文件输出日志
+    """
     class Tee(object):
         def __init__(self, *files):
             self.files = files
@@ -34,6 +50,9 @@ warning_file = None
 error_file = None
 
 def format_str(s:str):
+    """
+    把字符串中的英文符号替换成中文符号
+    """
     s = s.replace("(","（")
     s = s.replace(")","）")
     s = s.replace(":","：")
@@ -41,6 +60,10 @@ def format_str(s:str):
     return s
 
 def split_texts(texts):
+    """
+    把["123456\n7890","发票代码","123455"]拆分成["123456","7890","发票代码","123455"]
+    即如果一个字符串中间有不可见字符，则拆分成两个字符串。
+    """
     result = []
     
     # 遍历每个文本
@@ -56,6 +79,9 @@ def split_texts(texts):
     return result
 
 def get_pdf_texts(pdf_path):
+   """
+   辅助函数：获取PDF文件中的文本
+   """
    doc = fitz.open(pdf_path)
    pdf_page_texts = []
    for page in doc:
@@ -69,6 +95,9 @@ def get_pdf_texts(pdf_path):
    return pdf_page_texts
 
 def print_error(pdf_path:str,ocr_texts:List[str],pdf_texts:List[str],func_name:str,other_info:str=""):
+    """
+    辅助函数：打印错误信息
+    """
     print(f"~~~~~~~{func_name}_error:{pdf_path}~~~~~~~~")
     print(ocr_texts)
     print("=====ocr_texts↑  pdf_texts↓=====")
@@ -78,8 +107,11 @@ def print_error(pdf_path:str,ocr_texts:List[str],pdf_texts:List[str],func_name:s
 
 def valid_field(field_value:str,pdf_texts:List[str],pdf_path):
     """
+    ocr识别的文本可能会有误差，所以我们需要验证一下识别的文本是否正确。
+    field_value是ocr识别的文本，pdf_texts是pdf中的文本。
+    格式化：把所有的英文符号替换成中文符号，比如把英文逗号替换成中文逗号，通过这样，可以在比较时忽略中英文符号的差异。
     从pdf_texts中找到field_value中格式化后相同的字符串。如果找不到，返回pdf_texts中最相似的字符串
-    格式化相同：把所有的英文符号替换成中文符号，比如把英文逗号替换成中文逗号
+    
     """
     f_field_value = format_str(str(field_value))
     for text in pdf_texts:
@@ -94,6 +126,18 @@ def valid_field(field_value:str,pdf_texts:List[str],pdf_path):
     return most_like
 
 def get_bei_zhu(ocr_texts,pdf_texts:List[str],pdf_path):
+    """
+    获取备注。
+    基本 思想：备注的文本在价税合计和开票人之间，在"备注"这个文本的右边。
+    工具：fitz page.get_text("blocks", sort=True) 不仅可以返回文本，还可以返回文本的坐标。
+    一个文本的坐标是(x0,y0,x1,y1)，其中(x0,y0)是文本的左上角坐标，(x1,y1)是文本的右下角坐标。
+    具体步骤：找到价税合计这个文本的右下角顶点的y坐标:bei_zhu_area_y0
+    找到开票人这个文本的左上角顶点的y坐标:bei_zhu_area_y1
+    那么备注的文本的y坐标范围就是[bei_zhu_area_y0,bei_zhu_area_y1]
+    然后找到备注这两个字的文本的右下角顶点的x坐标:bei_zhu_area_x0
+    那么备注的文本的x坐标范围就是[bei_zhu_area_x0,∞)
+    在这个范围内的文本就是备注的文本
+    """
     doc = fitz.open(pdf_path)
     page  = doc[-1]
     blocks = page.get_text("blocks", sort=True)
@@ -127,6 +171,9 @@ def get_bei_zhu(ocr_texts,pdf_texts:List[str],pdf_path):
     return bz_text
 
 def get_fa_piao_hao_ma(ocr_texts,pdf_texts:List[str],pdf_path):
+    """
+    提取发票号码。
+    """
     text = "".join(ocr_texts)
     invoice_number_search = re.search(r'发票号码[:：]?\s*(\d+)', text)
     invoice_number = invoice_number_search.group(1).strip() if invoice_number_search else None
@@ -140,7 +187,10 @@ def get_fa_piao_hao_ma(ocr_texts,pdf_texts:List[str],pdf_path):
 
 def valid_shun_xu(ming_cheng_shui_hao,pdf_path):
     """
-    确保购买方在前，销售方在后
+    这个是get_ming_cheng_sui_hao的辅助函数。请先了解get_ming_cheng_sui_hao的注释。
+    函数功能：确保购买方在前，销售方在后。
+    通过文本的x坐标来判断。购买方的x坐标一定小于销售方的x坐标。
+    通过get_text("blocks", sort=True)  不仅可以获取文本内容，还可以获取文本的坐标。
     """
     # 首先找到ming_cheng_shui_hao中4个内容所在的块
     doc = fitz.open(pdf_path)
@@ -175,6 +225,14 @@ def valid_shun_xu(ming_cheng_shui_hao,pdf_path):
         ming_cheng_shui_hao[1], ming_cheng_shui_hao[3] = ming_cheng_shui_hao[3], ming_cheng_shui_hao[1]
     return ming_cheng_shui_hao
 def get_ming_cheng_sui_hao(ocr_texts,pdf_texts:List[str],pdf_path):
+    """
+    提取名称税号,首先通过ocr识别文本。找到名称:xxxxx  xxxx就是我们要的信息。
+    找到识别号:xxxxx   xxxx也是我们要的信息。
+    我们要找到两个名称和税号。
+    但我们并不知道这两个名称和税号哪两个是销售方哪两个是购买方的。
+    此时我们可以通过这两个文本的位置来判断。
+    我们通过valid_shun_xu函数来确保购买方在前，销售方在后
+    """
     text = "\n".join(ocr_texts)
     name_search = re.findall(r'名\s*称[:：]+\s*(\S+)', text)
     tax_id_search = re.findall(r'识别号[:：]?\s*(\S+)', text)
@@ -193,6 +251,9 @@ def get_ming_cheng_sui_hao(ocr_texts,pdf_texts:List[str],pdf_path):
         return None
     
 def get_fa_piao_lei_xing(ocr_texts,pdf_texts:List[str],pdf_path):
+    """
+    提取发票类型，直接从pdf_texts中找，不需要ocr
+    """
     for text in pdf_texts:
             invoice_type_search = re.search(r'(增值税专用发票|普通发票)', text)
             invoice_type = invoice_type_search.group(1) if invoice_type_search else None
@@ -200,12 +261,22 @@ def get_fa_piao_lei_xing(ocr_texts,pdf_texts:List[str],pdf_path):
                 return invoice_type
     return "未识别发票类型"
 def get_he_ji_jin_e2(ocr_texts,pdf_texts:List[str],pdf_path):
+    """
+    提取合计金额，这个方案是直接在pdf_texts中查找。
+    get_text("blocks", sort=True) 不仅返回了文本的内容，还返回了文本的坐标。
+    合计金额一般在价税合计这一文本的同一行。
+    首先找到价税合计的位置的y坐标(y0,y1)。(y0,y1)表示价税合计的y轴坐标范围，y1减去y0是价税合计这一行的高度
+    然后,找y坐标与[y0,y1]有重合的文本。在这些文本中找到￥，它后面的数字就是金额
+    有时候，金额可能就在价税合计这一文本里，这在下面关键点1处处理。
+    如果找到多个金额，程序无法识别。会返回None
+    如果这个范围内只有一个金额，就返回这个金额
+    """
     doc = fitz.open(pdf_path)
     page  = doc[-1]
     blocks = page.get_text("blocks", sort=True)
     my_blocks = []
-    jia_sui_he_ji_y0= 0
-    jia_sui_he_ji_y1 = 0
+    jia_sui_he_ji_y0= 0  #价税合计的位置
+    jia_sui_he_ji_y1 = 0 #价税合计的位置
     for block in blocks:
         x0, y0, x1, y1, text, block_no, block_type = block
         text:str
@@ -213,11 +284,11 @@ def get_he_ji_jin_e2(ocr_texts,pdf_texts:List[str],pdf_path):
         text = re.sub(r'\s+', '', text)
         if(text.find("价税合计")!=-1):
             jin_e_search = re.search(r'[¥￥]+([\d,]+\.\d{2})',text)
-            if jin_e_search:
+            if jin_e_search:     # 关键点1：如果价税合计这一行就是金额
                 return float(jin_e_search.group(1).replace(",",""))
             jia_sui_he_ji_y0 = y0
             jia_sui_he_ji_y1 = y1
-        my_blocks.append((text,x0,y0,x1,y1))
+        my_blocks.append((text,x0,y0,x1,y1))  # 关键点2：这里保存了每个文本的内容以及坐标
     if jia_sui_he_ji_y0 == 0 or jia_sui_he_ji_y1 == 0:
         print(f"~~~~~~~~get_he_ji_jin_e2_error:{pdf_path}~~~~~~~~~~~~")
         print(f"x0,y0,y1 = {jia_sui_he_ji_y0} {jia_sui_he_ji_y1}")
@@ -240,6 +311,7 @@ def get_he_ji_jin_e2(ocr_texts,pdf_texts:List[str],pdf_path):
 
 def get_he_ji_jin_e(ocr_texts,pdf_texts:List[str],pdf_path):
     """
+    提取合计金额，这个方案是直接在ocr_texts中查找。
     用ocr的方案有概率会识别不到，弃用，使用get_he_ji_jin_e2
     """
     text = "".join(ocr_texts)
@@ -268,9 +340,12 @@ field_func_maps = {
     "名称税号":get_ming_cheng_sui_hao,
     "合计金额":get_he_ji_jin_e2,
     "备注":get_bei_zhu,
-}
+}   # 这个用来存放各个信息的提取函数,比如发票类型的提取函数是get_fa_piao_lei_xing，即发票类型用get_fa_piao_lei_xing函数提取
 
 def pdf_infos_to_csv(pdf_infos):
+    """
+    把识别到的信息写入csv文件
+    """
     csv_field_name = ['PDF绝对路径',
         '发票类型',
         '发票号码',
